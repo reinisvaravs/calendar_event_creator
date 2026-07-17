@@ -9,7 +9,13 @@ import {
   deleteEvent,
 } from "./calendar.js";
 import { setPending, getPending, clearPending } from "./state.js";
+import { formatCost } from "./pricing.js";
 import { log } from "./logger.js";
+
+// Append the OpenAI cost footer for a message that involved a classify call.
+function withCost(text, parsed) {
+  return parsed?._usage ? `${text}\n\n${formatCost(parsed._usage)}` : text;
+}
 
 const app = express();
 app.use(express.json());
@@ -101,7 +107,7 @@ async function handleMessage(chatId, text) {
 
 async function handleCreate(chatId, parsed) {
   const event = await createEvent(parsed);
-  await sendMessage(chatId, formatCreated(parsed, event));
+  await sendMessage(chatId, withCost(formatCreated(parsed, event), parsed));
   log.info("Create done", { eventId: event.id });
 }
 
@@ -112,11 +118,11 @@ async function handleList(chatId, parsed) {
     q: parsed.searchText,
   });
   if (events.length === 0) {
-    await sendMessage(chatId, "📭 No events found for that period.");
+    await sendMessage(chatId, withCost("📭 No events found for that period.", parsed));
     return;
   }
   const lines = events.map((ev, i) => `${i + 1}. *${ev.summary}* — ${fmtWhen(ev)}${ev.location ? ` @ ${ev.location}` : ""}`);
-  await sendMessage(chatId, `📅 *Your events:*\n${lines.join("\n")}`);
+  await sendMessage(chatId, withCost(`📅 *Your events:*\n${lines.join("\n")}`, parsed));
 }
 
 // Shared find-then-confirm flow for delete and edit.
@@ -130,7 +136,10 @@ async function handleFind(chatId, parsed, op) {
   if (events.length === 0) {
     await sendMessage(
       chatId,
-      `🔍 I couldn't find an event matching "${parsed.searchText || "that"}". Try being more specific.`
+      withCost(
+        `🔍 I couldn't find an event matching "${parsed.searchText || "that"}". Try being more specific.`,
+        parsed
+      )
     );
     return;
   }
@@ -144,7 +153,7 @@ async function handleFind(chatId, parsed, op) {
       op === "delete"
         ? `🗑 Delete this event?\n\n*${ev.summary}* — ${fmtWhen(ev)}`
         : `✏️ Update this event?\n\n*${ev.summary}* — ${fmtWhen(ev)}\n→ ${describeChanges(changes)}`;
-    await sendMessage(chatId, `${preview}\n\n_Reply *yes* to confirm or *no* to cancel._`);
+    await sendMessage(chatId, withCost(`${preview}\n\n_Reply *yes* to confirm or *no* to cancel._`, parsed));
     return;
   }
 
@@ -154,7 +163,10 @@ async function handleFind(chatId, parsed, op) {
   const verb = op === "delete" ? "delete" : "edit";
   await sendMessage(
     chatId,
-    `❓ Found ${events.length} matches. Which one to ${verb}?\n${lines.join("\n")}\n\n_Reply with a number, or *no* to cancel._`
+    withCost(
+      `❓ Found ${events.length} matches. Which one to ${verb}?\n${lines.join("\n")}\n\n_Reply with a number, or *no* to cancel._`,
+      parsed
+    )
   );
 }
 

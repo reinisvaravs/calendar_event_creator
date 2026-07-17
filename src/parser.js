@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { config } from "./config.js";
 import { log } from "./logger.js";
+import { estimateCost } from "./pricing.js";
 
 const client = new OpenAI({ apiKey: config.openai.apiKey });
 
@@ -119,12 +120,16 @@ export async function classifyIntent(messageText) {
       json_schema: { name: "calendar_intent", strict: true, schema },
     },
   });
+  const usage = estimateCost(config.openai.model, completion.usage);
   log.info("OpenAI response", {
     ms: Date.now() - started,
-    tokens: completion.usage?.total_tokens,
+    tokens: usage.totalTokens,
+    costUSD: usage.cost,
   });
 
   const content = completion.choices[0]?.message?.content;
   if (!content) throw new Error("OpenAI returned no content.");
-  return JSON.parse(content);
+  const parsed = JSON.parse(content);
+  parsed._usage = usage; // { cost, totalTokens, ... } for cost reporting
+  return parsed;
 }
