@@ -4,52 +4,64 @@ import { log } from "./logger.js";
 
 const client = new OpenAI({ apiKey: config.openai.apiKey });
 
-// JSON schema for the structured event the model must return.
-const eventSchema = {
+// One schema covers all intents. Fields not relevant to a given intent are
+// returned as empty strings / defaults.
+const schema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    understood: {
-      type: "boolean",
+    intent: {
+      type: "string",
+      enum: ["create", "list", "delete", "edit", "unknown"],
       description:
-        "true if the message clearly describes a calendar event, false otherwise.",
+        "create = add a new event; list = show/read events; delete = cancel an event; edit = change an existing event; unknown = not a calendar request.",
     },
     clarification: {
       type: "string",
       description:
-        "If understood is false, a short question asking the user for what's missing. Empty string otherwise.",
+        "If intent is unknown, a short question asking what the user wants. Empty otherwise.",
     },
-    title: { type: "string", description: "Short event title." },
-    description: {
-      type: "string",
-      description: "Any extra detail/notes. Empty string if none.",
-    },
-    location: {
-      type: "string",
-      description: "Location or address. Empty string if none.",
-    },
-    allDay: {
-      type: "boolean",
-      description: "true for an all-day event with no specific time.",
-    },
+
+    // Event details. For 'create' these describe the new event. For 'edit'
+    // these are the NEW values to apply — leave a field empty to keep it.
+    title: { type: "string" },
+    description: { type: "string" },
+    location: { type: "string" },
+    allDay: { type: "boolean" },
     start: {
       type: "string",
       description:
-        "Start. For timed events: ISO 8601 local datetime 'YYYY-MM-DDTHH:mm:ss' (no offset). For all-day: 'YYYY-MM-DD'.",
+        "Timed: 'YYYY-MM-DDTHH:mm:ss' local (no offset). All-day: 'YYYY-MM-DD'. Empty if not applicable.",
     },
     end: {
       type: "string",
       description:
-        "End, same format as start. For timed events default to 1 hour after start if unspecified. For all-day this is the (exclusive) end date; use the same day if it's a single day.",
+        "Same format as start. For timed events default to 1h after start. Empty if not applicable.",
     },
     timezone: {
       type: "string",
+      description: "IANA timezone, e.g. 'Europe/Riga'. Use the default unless implied.",
+    },
+
+    // Search window, used by list / delete / edit to locate events.
+    searchText: {
+      type: "string",
       description:
-        "IANA timezone, e.g. 'Europe/Riga'. Use the provided default unless the message clearly implies another.",
+        "Keywords identifying the target event(s), e.g. 'dentist'. Empty for plain listing.",
+    },
+    rangeStart: {
+      type: "string",
+      description:
+        "Start of the search/list window as 'YYYY-MM-DDTHH:mm:ss' local. Empty = from now.",
+    },
+    rangeEnd: {
+      type: "string",
+      description:
+        "End of the search/list window as 'YYYY-MM-DDTHH:mm:ss' local. Empty = open-ended.",
     },
   },
   required: [
-    "understood",
+    "intent",
     "clarification",
     "title",
     "description",
@@ -58,10 +70,13 @@ const eventSchema = {
     "start",
     "end",
     "timezone",
+    "searchText",
+    "rangeStart",
+    "rangeEnd",
   ],
 };
 
-export async function parseEvent(messageText) {
+export async function classifyIntent(messageText) {
   const now = new Date();
   const nowLocal = now.toLocaleString("en-US", {
     timeZone: config.defaultTimezone,
@@ -74,14 +89,21 @@ export async function parseEvent(messageText) {
   });
 
   const system = [
-    "You extract a single calendar event from a user's free-form message.",
-    `The current date and time is: ${nowLocal} (${config.defaultTimezone}).`,
-    `The user's default timezone is ${config.defaultTimezone}.`,
-    "Resolve relative dates like 'tomorrow', 'next Friday', 'in 2 hours' against the current time.",
-    "Never invent details the user didn't provide; leave optional fields as empty strings.",
-    "If the message is not a real event request (e.g. a greeting), set understood=false and put a short question in clarification.",
-    "Output local datetimes WITHOUT timezone offsets; report the timezone separately in the timezone field.",
-  ].join(" ");
+    "You are a calendar assistant. Classify the user's message into one intent and extract fields.",
+    `Current date/time: ${nowLocal} (${config.defaultTimezone}).`,
+    `Default timezone: ${config.defaultTimezone}.`,
+    "Resolve relative dates ('tomorrow', 'next Friday', 'in 2 hours') against the current time.",
+    "",
+    "Intents:",
+    "- create: user wants to add an event. Fill title/start/end/location/allDay/timezone.",
+    "- list: user wants to see events. Fill rangeStart/rangeEnd for the window (e.g. 'today' = today 00:00:00 to 23:59:59). searchText optional.",
+    "- delete: user wants to cancel an event. Fill searchText plus rangeStart/rangeEnd to locate it.",
+    "- edit: user wants to change an event. Fill searchText + rangeStart/rangeEnd to find it, and put the NEW values in title/start/end/location (leave unchanged fields empty). When changing time, provide BOTH start and end.",
+    "- unknown: greetings or anything not calendar-related. Put a short prompt in clarification.",
+    "",
+    "Always output local datetimes WITHOUT timezone offsets; report the zone in timezone.",
+    "Never invent details the user didn't give; leave optional fields empty.",
+  ].join("\n");
 
   log.info("OpenAI request", { model: config.openai.model, chars: messageText.length });
   const started = Date.now();
@@ -94,11 +116,7 @@ export async function parseEvent(messageText) {
     ],
     response_format: {
       type: "json_schema",
-      json_schema: {
-        name: "calendar_event",
-        strict: true,
-        schema: eventSchema,
-      },
+      json_schema: { name: "calendar_intent", strict: true, schema },
     },
   });
   log.info("OpenAI response", {
