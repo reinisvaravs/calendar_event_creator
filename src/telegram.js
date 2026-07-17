@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { log } from "./logger.js";
 
 const API_BASE = `https://api.telegram.org/bot${config.telegram.botToken}`;
 
@@ -16,7 +17,9 @@ export async function sendMessage(chatId, text) {
   });
   if (!res.ok) {
     const body = await res.text();
-    console.error(`Telegram sendMessage failed (${res.status}): ${body}`);
+    log.error("Telegram sendMessage failed", { status: res.status, body });
+  } else {
+    log.info("Telegram message sent", { chatId });
   }
   return res.ok;
 }
@@ -29,8 +32,8 @@ export async function sendTyping(chatId) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, action: "typing" }),
     });
-  } catch {
-    // Non-critical, ignore.
+  } catch (err) {
+    log.warn("Telegram sendChatAction failed", { error: err.message });
   }
 }
 

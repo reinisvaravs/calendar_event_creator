@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { config } from "./config.js";
+import { log } from "./logger.js";
 
 const auth = new google.auth.GoogleAuth({
   credentials: {
@@ -47,9 +48,28 @@ function addOneDay(dateStr) {
 }
 
 export async function createEvent(parsed) {
-  const res = await calendar.events.insert({
+  const resource = toEventResource(parsed);
+  log.info("Google Calendar insert", {
     calendarId: config.google.calendarId,
-    requestBody: toEventResource(parsed),
+    summary: resource.summary,
   });
-  return res.data; // includes htmlLink
+  const started = Date.now();
+  try {
+    const res = await calendar.events.insert({
+      calendarId: config.google.calendarId,
+      requestBody: resource,
+    });
+    log.info("Google Calendar insert ok", {
+      ms: Date.now() - started,
+      eventId: res.data.id,
+    });
+    return res.data; // includes htmlLink
+  } catch (err) {
+    log.error("Google Calendar insert failed", {
+      ms: Date.now() - started,
+      code: err.code,
+      message: err.errors?.[0]?.message || err.message,
+    });
+    throw err;
+  }
 }

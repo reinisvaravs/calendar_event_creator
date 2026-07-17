@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { config } from "./config.js";
+import { log } from "./logger.js";
 
 const client = new OpenAI({ apiKey: config.openai.apiKey });
 
@@ -82,6 +83,8 @@ export async function parseEvent(messageText) {
     "Output local datetimes WITHOUT timezone offsets; report the timezone separately in the timezone field.",
   ].join(" ");
 
+  log.info("OpenAI request", { model: config.openai.model, chars: messageText.length });
+  const started = Date.now();
   const completion = await client.chat.completions.create({
     model: config.openai.model,
     temperature: 0,
@@ -97,6 +100,10 @@ export async function parseEvent(messageText) {
         schema: eventSchema,
       },
     },
+  });
+  log.info("OpenAI response", {
+    ms: Date.now() - started,
+    tokens: completion.usage?.total_tokens,
   });
 
   const content = completion.choices[0]?.message?.content;
