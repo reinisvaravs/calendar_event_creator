@@ -1,0 +1,21 @@
+{
+  "name": "calendar-creator",
+  "version": "1.0.0",
+  "description": "Telegram bot that turns free-text messages into Google Calendar events via OpenAI parsing.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "set-webhook": "node scripts/set-webhook.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "googleapis": "^144.0.0",
+    "openai": "^4.67.3"
+  }
+}
