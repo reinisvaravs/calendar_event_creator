@@ -13,9 +13,9 @@ const schema = {
   properties: {
     intent: {
       type: "string",
-      enum: ["create", "list", "delete", "edit", "unknown"],
+      enum: ["create", "list", "delete", "edit", "duplicate", "unknown"],
       description:
-        "create = add a new event; list = show/read events; delete = cancel an event; edit = change an existing event; unknown = not a calendar request.",
+        "create = add a new event; list = show/read events; delete = cancel an event; edit = change an existing event; duplicate = copy an existing event to another date/time; unknown = not a calendar request.",
     },
     clarification: {
       type: "string",
@@ -100,7 +100,10 @@ export async function classifyIntent(messageText) {
     "- list: user wants to see events. Fill rangeStart/rangeEnd for the window (e.g. 'today' = today 00:00:00 to 23:59:59). searchText optional.",
     "- delete: user wants to cancel an event. Fill searchText plus rangeStart/rangeEnd to locate it.",
     "- edit: user wants to change an event. Fill searchText + rangeStart/rangeEnd to find it, and put the NEW values in title/start/end/location (leave unchanged fields empty). When changing time, provide BOTH start and end.",
+    "- duplicate: user wants a copy of an existing event at another date/time ('duplicate this', 'same event again on X', 'repeat it next week'). Fill searchText + rangeStart/rangeEnd to find the SOURCE event, and put the NEW date/time in start/end. Only fill title/location/description if the copy should differ from the source.",
     "- unknown: greetings or anything not calendar-related. Put a short prompt in clarification.",
+    "",
+    "When the user quotes an event back to you (title, date, time, place) and asks for it again on another date, that is duplicate, not create. Use the quoted title/date as searchText/rangeStart-rangeEnd for the source.",
     "",
     "Always output local datetimes WITHOUT timezone offsets; report the zone in timezone.",
     "Never invent details the user didn't give; leave optional fields empty.",

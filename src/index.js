@@ -6,6 +6,7 @@ import {
   createEvent,
   listEvents,
   updateEvent,
+  duplicateEvent,
   deleteEvent,
 } from "./calendar.js";
 import { setPending, getPending, clearPending } from "./state.js";
@@ -94,6 +95,8 @@ async function handleMessage(chatId, text) {
       return handleFind(chatId, parsed, "delete");
     case "edit":
       return handleFind(chatId, parsed, "edit");
+    case "duplicate":
+      return handleFind(chatId, parsed, "duplicate");
     default:
       await sendMessage(
         chatId,
@@ -144,7 +147,7 @@ async function handleFind(chatId, parsed, op) {
     return;
   }
 
-  const changes = op === "edit" ? extractChanges(parsed) : null;
+  const changes = op === "delete" ? null : extractChanges(parsed);
 
   if (events.length === 1) {
     const ev = events[0];
@@ -152,7 +155,9 @@ async function handleFind(chatId, parsed, op) {
     const preview =
       op === "delete"
         ? `🗑 Delete this event?\n\n*${ev.summary}* — ${fmtWhen(ev)}`
-        : `✏️ Update this event?\n\n*${ev.summary}* — ${fmtWhen(ev)}\n→ ${describeChanges(changes)}`;
+        : op === "duplicate"
+          ? `📋 Copy this event?\n\n*${ev.summary}* — ${fmtWhen(ev)}\n→ ${describeChanges(changes)}\n_Reminders, colour and other details are copied._`
+          : `✏️ Update this event?\n\n*${ev.summary}* — ${fmtWhen(ev)}\n→ ${describeChanges(changes)}`;
     await sendMessage(chatId, withCost(`${preview}\n\n_Reply *yes* to confirm or *no* to cancel._`, parsed));
     return;
   }
@@ -160,7 +165,7 @@ async function handleFind(chatId, parsed, op) {
   // Multiple matches — ask which one by number.
   setPending(chatId, { op, candidates: events, changes });
   const lines = events.map((ev, i) => `${i + 1}. *${ev.summary}* — ${fmtWhen(ev)}`);
-  const verb = op === "delete" ? "delete" : "edit";
+  const verb = op === "delete" ? "delete" : op === "duplicate" ? "copy" : "edit";
   await sendMessage(
     chatId,
     withCost(
@@ -223,6 +228,14 @@ async function executePending(chatId, op, event, changes) {
         (updated.htmlLink ? `\n[Open in Google Calendar](${updated.htmlLink})` : "")
     );
     log.info("Edit done", { eventId: event.id });
+  } else if (op === "duplicate") {
+    const copy = await duplicateEvent(event.id, changes);
+    await sendMessage(
+      chatId,
+      `📋 Copied *${copy.summary || event.summary}* → ${prettyLocal(changes.start || "")}`.trim() +
+        (copy.htmlLink ? `\n[Open in Google Calendar](${copy.htmlLink})` : "")
+    );
+    log.info("Duplicate done", { sourceId: event.id, eventId: copy.id });
   }
 }
 
@@ -254,7 +267,8 @@ function helpText() {
     "*Create:* Dentist tomorrow at 3pm at Main St\n" +
     "*Read:* what's on today? / events next week\n" +
     "*Edit:* move my dentist appointment to 4pm\n" +
-    "*Delete:* cancel my dentist appointment\n\n" +
+    "*Delete:* cancel my dentist appointment\n" +
+    "*Duplicate:* same gym session again next Tuesday 10:00\n\n" +
     "For edits and deletes I'll ask you to confirm first."
   );
 }

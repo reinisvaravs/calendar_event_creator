@@ -156,6 +156,91 @@ export async function updateEvent(eventId, changes) {
   return res.data;
 }
 
+// --- Duplicate --------------------------------------------------------------
+
+// Properties worth carrying over to a copy. Everything else (id, etag, links,
+// organizer, recurrence, sequence…) is server-owned or instance-specific.
+// Attendees are deliberately excluded: inserting them would email real people.
+const COPYABLE_FIELDS = [
+  "summary",
+  "description",
+  "location",
+  "colorId",
+  "reminders",
+  "transparency",
+  "visibility",
+  "eventType",
+  "extendedProperties",
+  "guestsCanModify",
+  "guestsCanInviteOthers",
+  "guestsCanSeeOtherGuests",
+];
+
+// Add ms to a naive local 'YYYY-MM-DDTHH:mm:ss' string, staying naive.
+function shiftLocal(localIso, ms) {
+  const d = new Date(`${localIso}Z`);
+  return new Date(d.getTime() + ms).toISOString().slice(0, 19);
+}
+
+function sourceDurationMs(src) {
+  const s = src.start?.dateTime;
+  const e = src.end?.dateTime;
+  if (!s || !e) return 60 * 60 * 1000;
+  return new Date(e).getTime() - new Date(s).getTime();
+}
+
+// Copy an existing event to a new date/time. `changes` uses parser fields;
+// only non-empty values override what the source already has.
+export async function duplicateEvent(eventId, changes) {
+  const { data: src } = await calendar.events.get({
+    calendarId: config.google.calendarId,
+    eventId,
+  });
+
+  const resource = {};
+  for (const field of COPYABLE_FIELDS) {
+    if (src[field] !== undefined) resource[field] = src[field];
+  }
+  if (changes.title) resource.summary = changes.title;
+  if (changes.description) resource.description = changes.description;
+  if (changes.location) resource.location = changes.location;
+
+  // A bare 'YYYY-MM-DD' start means all-day regardless of what the model said.
+  const wantsAllDay =
+    changes.allDay || (changes.start ? !changes.start.includes("T") : Boolean(src.start?.date));
+
+  if (!changes.start) {
+    // No new time given — keep the source's own timing.
+    resource.start = src.start;
+    resource.end = src.end;
+  } else if (wantsAllDay) {
+    resource.start = { date: changes.start };
+    resource.end = {
+      date:
+        changes.end && changes.end !== changes.start
+          ? changes.end
+          : addOneDay(changes.start),
+    };
+  } else {
+    const tz = changes.timezone || src.start?.timeZone || config.defaultTimezone;
+    const end = changes.end || shiftLocal(changes.start, sourceDurationMs(src));
+    resource.start = { dateTime: changes.start, timeZone: tz };
+    resource.end = { dateTime: end, timeZone: tz };
+  }
+
+  log.info("Google Calendar duplicate", {
+    sourceId: eventId,
+    summary: resource.summary,
+    copied: Object.keys(resource),
+  });
+  const res = await calendar.events.insert({
+    calendarId: config.google.calendarId,
+    requestBody: resource,
+  });
+  log.info("Google Calendar duplicate ok", { eventId: res.data.id });
+  return res.data;
+}
+
 // --- Delete -----------------------------------------------------------------
 
 export async function deleteEvent(eventId) {
